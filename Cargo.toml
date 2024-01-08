@@ -1,0 +1,14 @@
+[package]
+name = "saphire-typegen"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+prettier-please = "0.2.0"
+proc-macro2 = "1.0.76"
+quote = "1.0.35"
+serde = {version = "1.0.195", features = ["derive"]}
+serde_json = "1.0.111"
+syn = { version = "2.0.48", default-features = false, features = ["full", "parsing"] }
