@@ -1,4 +1,4 @@
-use std::{io::prelude::*, path::PathBuf, fs::File, collections::hash_map, ops::RangeBounds};
+use std::{io::prelude::*, path::PathBuf, fs::File, collections::{hash_map, HashSet}, ops::RangeBounds};
 use proc_macro2::token_stream;
 use quote::quote;
 use prettier_please;
@@ -31,6 +31,8 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
     module_code.insert("control".to_string(), Vec::new());
     module_code.insert("select_object".to_string(), Vec::new());
 
+    let mut enum_names = HashSet::new();
+
     for (i, action) in actions.iter().enumerate() {
         // Skips call function and call process actions.
         // TODO: See if there's a way to parse these.
@@ -39,7 +41,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         }
         let action = serde_json::from_value::<Action>(action.clone()).expect(&format!("Failed to parse action #{}!", i));
         let action_block = action.codeblock_name.to_ascii_lowercase().replace(" ", "_");
-        let action = gen_action(action);
+        let action = gen_action(action, &mut enum_names);
 
         module_code.get_mut(&action_block).unwrap().push(action);
     }
@@ -50,8 +52,10 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         eprintln!("Writing module {} to {}...", module_name, module_path.to_str().unwrap());
         let mut file = File::create(&module_path).unwrap();
 
-        let enum_name = quote::format_ident!("{}", module_name);
+        let enum_name = quote::format_ident!("{}", snake_to_camel_case(&module_name));
         let module_code = quote!(
+            use either::Either;
+
             pub enum #enum_name {
                 #(#module_code)*
             }
@@ -67,14 +71,30 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
 }
 
 /// Generates a single enum variant for a given action object.
-fn gen_action(action: Action) -> token_stream::TokenStream {
+fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream::TokenStream {
     let mut action_name = match &action.icon {
-        ActionIconOptions::Icon(icon) => icon.name.replace(|c: char| {!c.is_ascii_alphabetic()}, ""),
-        ActionIconOptions::Argless(argless) => argless.name.replace(|c: char| {!c.is_ascii_alphabetic()}, "")
+        ActionIconOptions::Icon(icon) => format_name(&icon.name),
+        ActionIconOptions::Argless(argless) => format_name(&argless.name)
     };
-    if action_name == "" {
-        action_name = action.name.replace(|c: char| {!c.is_ascii_alphabetic()}, "");
+    if action.aliases.len() > 0 {
+        action_name = format_name(&action.aliases[0]);
     }
+    if action_name == "" || used_names.contains(&action_name) {
+        action_name = format_name(&action.name);
+    }
+    if used_names.contains(&action_name) {
+        action_name = format!("{}N", action_name)
+    }
+    // if used_names.contains(&action_name) &&
+    //     match &action.icon {
+    //         ActionIconOptions::Icon(icon) => icon.,
+    //         ActionIconOptions::Argless(argless) => format_name(&argless.name)
+    //     }
+    // {
+    //     action_name = format_name(&action.[0]);
+    // }
+    used_names.insert(action_name.clone());
+
     let action_name = quote::format_ident!("{}", action_name);
 
     let mut arg_types = Vec::new();
@@ -113,7 +133,7 @@ fn gen_action(action: Action) -> token_stream::TokenStream {
                 output = quote!(Option<#output>);
             }
 
-            let arg_name = quote::format_ident!("{}", outer_arg.description[0].replace(" ", "_").replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "").to_lowercase());
+            let arg_name = quote::format_ident!("{}", outer_arg.description[0].replace(" ", "_").replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "").to_lowercase().replace("type", "type_"));
             arg_types.push(quote!(
                 #arg_name: #output
             ));
@@ -131,6 +151,37 @@ fn gen_action(action: Action) -> token_stream::TokenStream {
     enum_var
 }
 
+fn format_name(name: &str) -> String {
+    let name = name.replace(" ", "")
+        .replace("=", "Eq")
+        .replace("<", "LessThan")
+        .replace(">", "GreaterThan")
+        .replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "");
+
+    name
+}
+
 fn arg_type_to_rust(arg_type: String) -> token_stream::TokenStream {
     quote!(usize) // TODO: Implement this
+}
+
+fn snake_to_camel_case(s: &str) -> String {
+    let mut output = String::new();
+    let mut capitalize = true;
+    for c in s.chars() {
+        if c == '_' {
+            capitalize = true;
+        }
+        else if capitalize && c.is_ascii_alphabetic() {
+            output.push(c.to_ascii_uppercase());
+            capitalize = false;
+        }
+        else {
+            if c == ' ' {
+                capitalize = true;
+            }
+            output.push(c);
+        }
+    }
+    output
 }
