@@ -17,7 +17,7 @@ pub struct ActionTags {
     pub options: Vec<ActionTagOption>,
     pub default_option: String,
     pub slot: usize,
-    pub aliases: Vec<String>,
+    //pub aliases: Vec<String>, // apparently this was removed, leaving it here incase it comes back
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -51,20 +51,20 @@ pub enum ActionIconOptions {
     Icon (
         ActionIcon,
     ),
-    Argless (
-        ActionIconArgless,
+    Event (
+        ActionEventIcon,
     ),
 }
 
 impl Default for ActionIconOptions {
     fn default() -> Self {
-        ActionIconOptions::Argless(ActionIconArgless::default())
+        ActionIconOptions::Event(ActionEventIcon::default())
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct ActionIconArgless {
+pub struct ActionEventIcon {
     pub material: String,
     pub name: String,
     pub deprecated_note: Vec<String>,
@@ -95,7 +95,8 @@ pub struct ActionIcon {
     pub advanced: bool,
     pub loaded_item: String,
     //pub tags: usize, // TODO: change action_icon to be an enum for support of icons that dont have tags or arguments
-    pub arguments: Vec<ActionArgOptions>
+    pub arguments: Vec<ActionArgOptions>,
+    pub return_values: Vec<ActionIconReturnTypeOption>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -119,6 +120,24 @@ pub struct ActionArg {
     pub notes: Vec<Vec<String>>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum ActionIconReturnTypeOption {
+    Text {
+        text: String,
+    },
+    Arg (
+        ActionIconReturnType,
+    )
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct ActionIconReturnType {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    pub description: Vec<String>,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -129,11 +148,11 @@ mod test {
         println!("{}", encoded);
         let json = r#"
         {
-            "name": "Raycast",
-            "codeblockName": "SET VARIABLE",
+            "name": "SetReducedDebug",
+            "codeblockName": "PLAYER ACTION",
             "tags": [
                 {
-                    "name": "Entity Collision",
+                    "name": "Reduced Debug Info Enabled",
                     "options": [
                         {
                             "name": "True",
@@ -141,19 +160,10 @@ mod test {
                                 "material": "LIME_DYE",
                                 "name": "",
                                 "deprecatedNote": [],
-                                "description": [
-                                    "Collides with players",
-                                    "and entities."
-                                ],
+                                "description": [],
                                 "example": [],
                                 "worksWith": [],
-                                "additionalInfo": [
-                                    [
-                                        "To select entities on the",
-                                        "ray, use 'Filter Selection",
-                                        "by Raycast'."
-                                    ]
-                                ],
+                                "additionalInfo": [],
                                 "requiredRank": "",
                                 "requireTokens": false,
                                 "requireRankAndTokens": false,
@@ -181,128 +191,19 @@ mod test {
                             "aliases": []
                         }
                     ],
-                    "defaultOption": "False",
-                    "slot": 25,
-                    "aliases": []
-                },
-                {
-                    "name": "Block Collision",
-                    "options": [
-                        {
-                            "name": "All blocks",
-                            "icon": {
-                                "material": "STONE_BRICKS",
-                                "name": "",
-                                "deprecatedNote": [],
-                                "description": [
-                                    "Passes through air only."
-                                ],
-                                "example": [],
-                                "worksWith": [],
-                                "additionalInfo": [
-                                    [
-                                        "The hit location's",
-                                        "direction is set to",
-                                        "the hit block side."
-                                    ]
-                                ],
-                                "requiredRank": "",
-                                "requireTokens": false,
-                                "requireRankAndTokens": false,
-                                "advanced": false,
-                                "loadedItem": ""
-                            },
-                            "aliases": []
-                        },
-                        {
-                            "name": "Non-fluid blocks",
-                            "icon": {
-                                "material": "WATER_BUCKET",
-                                "name": "",
-                                "deprecatedNote": [],
-                                "description": [
-                                    "Passes through fluids",
-                                    "(water and lava)."
-                                ],
-                                "example": [],
-                                "worksWith": [],
-                                "additionalInfo": [
-                                    [
-                                        "The hit location's",
-                                        "direction is set to",
-                                        "the hit block side."
-                                    ]
-                                ],
-                                "requiredRank": "",
-                                "requireTokens": false,
-                                "requireRankAndTokens": false,
-                                "advanced": false,
-                                "loadedItem": ""
-                            },
-                            "aliases": []
-                        },
-                        {
-                            "name": "Solid blocks",
-                            "icon": {
-                                "material": "TALL_GRASS",
-                                "name": "",
-                                "deprecatedNote": [],
-                                "description": [
-                                    "Passes through non-solid",
-                                    "blocks such as tall grass,",
-                                    "and through fluids."
-                                ],
-                                "example": [],
-                                "worksWith": [],
-                                "additionalInfo": [
-                                    [
-                                        "The hit location's",
-                                        "direction is set to",
-                                        "the hit block side."
-                                    ]
-                                ],
-                                "requiredRank": "",
-                                "requireTokens": false,
-                                "requireRankAndTokens": false,
-                                "advanced": false,
-                                "loadedItem": ""
-                            },
-                            "aliases": []
-                        },
-                        {
-                            "name": "None",
-                            "icon": {
-                                "material": "FEATHER",
-                                "name": "",
-                                "deprecatedNote": [],
-                                "description": [
-                                    "Passes through all blocks."
-                                ],
-                                "example": [],
-                                "worksWith": [],
-                                "additionalInfo": [],
-                                "requiredRank": "",
-                                "requireTokens": false,
-                                "requireRankAndTokens": false,
-                                "advanced": false,
-                                "loadedItem": ""
-                            },
-                            "aliases": []
-                        }
-                    ],
-                    "defaultOption": "All blocks",
-                    "slot": 26,
-                    "aliases": []
+                    "defaultOption": "True",
+                    "slot": 26
                 }
             ],
             "aliases": [],
             "icon": {
-                "material": "SPECTRAL_ARROW",
-                "name": "Raycast from Location",
+                "material": "COMPASS",
+                "name": "§9Set Reduced Debug Info Enabled",
                 "deprecatedNote": [],
                 "description": [
-                    "Raycasts from a location",
-                    "to the first intersection."
+                    "When enabled, a player won't be",
+                    "able to see their coordinates,",
+                    "block info, or other info."
                 ],
                 "example": [],
                 "worksWith": [],
@@ -312,36 +213,9 @@ mod test {
                 "requireRankAndTokens": false,
                 "advanced": false,
                 "loadedItem": "",
-                "tags": 2,
-                "arguments": [
-                    {
-                        "type": "VARIABLE",
-                        "plural": false,
-                        "optional": false,
-                        "description": [
-                            "Variable to set"
-                        ],
-                        "notes": []
-                    },
-                    {
-                        "type": "LOCATION",
-                        "plural": false,
-                        "optional": false,
-                        "description": [
-                            "Ray origin"
-                        ],
-                        "notes": []
-                    },
-                    {
-                        "type": "NUMBER",
-                        "plural": false,
-                        "optional": false,
-                        "description": [
-                            "Ray distance"
-                        ],
-                        "notes": []
-                    }
-                ]
+                "tags": 1,
+                "arguments": [],
+                "returnValues": []
             }
         }
         "#;

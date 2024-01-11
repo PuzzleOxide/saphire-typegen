@@ -74,15 +74,15 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
 fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream::TokenStream {
     let mut action_name = match &action.icon {
         ActionIconOptions::Icon(icon) => format_name(&icon.name),
-        ActionIconOptions::Argless(argless) => format_name(&argless.name)
+        ActionIconOptions::Event(argless) => format_name(&argless.name)
     };
-    if action.aliases.len() > 0 {
-        action_name = format_name(&action.aliases[0]);
-    }
-    if action_name == "" || used_names.contains(&action_name) {
+    // if action.aliases.len() > 0 {
+    //     action_name = format_name(&action.aliases[0]);
+    // }
+    if action_name == "" || used_names.contains(&format!("{} {}", action_name, action.codeblock_name)) {
         action_name = format_name(&action.name);
     }
-    if used_names.contains(&action_name) {
+    if used_names.contains(&format!("{} {}", action_name, action.codeblock_name)) {
         action_name = format!("{}N", action_name)
     }
     // if used_names.contains(&action_name) &&
@@ -93,14 +93,14 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
     // {
     //     action_name = format_name(&action.[0]);
     // }
-    used_names.insert(action_name.clone());
+    used_names.insert(format!("{} {}", action_name, action.codeblock_name));
 
     let action_name = quote::format_ident!("{}", action_name);
 
     let mut arg_types = Vec::new();
     let args = match action.icon {
         ActionIconOptions::Icon(icon) => icon.arguments,
-        ActionIconOptions::Argless(_) => Vec::new(),
+        ActionIconOptions::Event(_) => Vec::new(),
     };
 
     let mut i = 0;
@@ -108,16 +108,16 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
     while i < len {
         if let ActionArgOptions::Arg(arg ) = &args[i] {
             let mut outer_arg = arg.clone();
-            let mut output = arg_type_to_rust(outer_arg.arg_type.clone());
+            let mut output = arg_type_to_rust(&outer_arg.arg_type);
             if len > i+2 {
                 if let ActionArgOptions::Text{ text } = &args[i+1] {
-                    if text == "OR" {
+                    if strip_colour(text) == "OR" {
                         if let ActionArgOptions::Arg(arg) = &args[i+2] {
                             if arg.arg_type == "NONE" {
                                 outer_arg.optional = true;
                             }
                             else {
-                                let inner_arg_type = arg_type_to_rust(arg.arg_type.clone());
+                                let inner_arg_type = arg_type_to_rust(&arg.arg_type);
                                 output = quote!(Either<#output, #inner_arg_type>);
                             }
                             i += 2;
@@ -133,7 +133,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
                 output = quote!(Option<#output>);
             }
 
-            let arg_name = quote::format_ident!("{}", outer_arg.description[0].replace(" ", "_").replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "").to_lowercase().replace("type", "type_"));
+            let arg_name = quote::format_ident!("{}", remove_leading_nonalpha(&outer_arg.description[0]).replace(" ", "_").replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "").to_lowercase().replace("type", "type_"));
             arg_types.push(quote!(
                 #arg_name: #output
             ));
@@ -151,8 +151,22 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
     enum_var
 }
 
+fn remove_leading_nonalpha(name: &str) -> String {
+    let mut output = String::new();
+    let mut begining = true;
+    for c in name.chars() {
+        if c.is_ascii_alphabetic() && begining {
+            begining = false;
+        }
+        if !begining {
+            output.push(c);
+        }
+    }
+    output
+}
+
 fn format_name(name: &str) -> String {
-    let name = name.replace(" ", "")
+    let name = strip_colour(name).replace(" ", "")
         .replace("=", "Eq")
         .replace("<", "LessThan")
         .replace(">", "GreaterThan")
@@ -161,8 +175,28 @@ fn format_name(name: &str) -> String {
     name
 }
 
-fn arg_type_to_rust(arg_type: String) -> token_stream::TokenStream {
-    quote!(usize) // TODO: Implement this
+fn arg_type_to_rust(arg_type: &str) -> token_stream::TokenStream {
+    match arg_type {
+        "NUMBER" => quote!(Number),
+        arg => quote!(UnkownArgType<#arg>)
+    }
+}
+
+fn strip_colour(s: &str) -> String {
+    let mut output = String::new();
+    let mut in_colour = false;
+    for c in s.chars() {
+        if c == '§' {
+            in_colour = true;
+        }
+        else if in_colour {
+            in_colour = false;
+        }
+        else {
+            output.push(c);
+        }
+    }
+    output
 }
 
 fn snake_to_camel_case(s: &str) -> String {
