@@ -55,6 +55,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         let enum_name = quote::format_ident!("{}", snake_to_camel_case(&module_name));
         let module_code = quote!(
             use either::Either;
+            use crate::types::*;
 
             pub enum #enum_name {
                 #(#module_code)*
