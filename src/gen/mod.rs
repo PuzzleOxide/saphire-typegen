@@ -109,27 +109,31 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
         if let ActionArgOptions::Arg(arg ) = &args[i] {
             let mut outer_arg = arg.clone();
             let mut output = arg_type_to_rust(&outer_arg.arg_type);
-            if len > i+2 {
-                if let ActionArgOptions::Text{ text } = &args[i+1] {
-                    if strip_colour(text) == "OR" {
-                        if let ActionArgOptions::Arg(arg) = &args[i+2] {
-                            if arg.arg_type == "NONE" {
-                                outer_arg.optional = true;
+            loop {
+                if len > i+2 {
+                    if let ActionArgOptions::Text{ text } = &args[i+1] {
+                        if strip_colour(text) == "OR" {
+                            if let ActionArgOptions::Arg(arg) = &args[i+2] {
+                                if arg.arg_type == "NONE" {
+                                    outer_arg.optional = true;
+                                }
+                                else {
+                                    let inner_arg_type = arg_type_to_rust(&arg.arg_type);
+                                    output = quote!(Either<#output, #inner_arg_type>);
+                                }
+                                i += 2;
+                                continue;
                             }
-                            else {
-                                let inner_arg_type = arg_type_to_rust(&arg.arg_type);
-                                output = quote!(Either<#output, #inner_arg_type>);
-                            }
-                            i += 2;
                         }
                     }
                 }
+                break;
             }
 
             if outer_arg.plural {
                 output = quote!(Vec<#output>);
             }
-            if outer_arg.optional {
+            else if outer_arg.optional {
                 output = quote!(Option<#output>);
             }
 
@@ -178,7 +182,25 @@ fn format_name(name: &str) -> String {
 fn arg_type_to_rust(arg_type: &str) -> token_stream::TokenStream {
     match arg_type {
         "NUMBER" => quote!(Number),
-        arg => quote!(UnkownArgType<#arg>)
+        "TEXT" => quote!(Text),
+        "COMPONENT" => quote!(MiniMessage),
+        "LOCATION" => quote!(Location),
+        "ITEM" => quote!(Item),
+        "PARTICLE" => quote!(Particle),
+        "VECTOR" => quote!(Vector),
+        "SOUND" => quote!(Sound),
+        "BLOCK" => quote!(Block),
+        "BLOCK_TAG" => quote!(BlockTag),
+        "PROJECTILE" => quote!(Projectile),
+        "POTION" => quote!(Potion),
+        "SPAWN_EGG" => quote!(SpawnEgg),
+        "ENTITY_TYPE" => quote!(EntityType),
+        "VARIABLE" => quote!(Variable),
+        "ANY_TYPE" => quote!(AnyType),
+        "DICT" => quote!(Dict),
+        "LIST" => quote!(List),
+        "VEHICLE" => quote!(Vehicle),
+        arg => todo!("arg type: {}", arg)
     }
 }
 
