@@ -170,15 +170,10 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
 
     let block_name = quote::format_ident!("{}", snake_to_camel_case(&action.codeblock_name.to_ascii_lowercase().replace(" ", "_")));
 
-    let nums = 1..=arg_names.len();
     let compile_function = quote!(
         #block_name::#action_name {#(#arg_names),*} => {
             let mut map = serde_json::Map::new();
-            let mut item_args = Vec::new();
-
-            #(item_args.push(
-                #arg_names.json(#nums)
-            );)*
+            let mut item_args = compile(vec![#(#arg_names.json()),*]);
 
             let mut args = serde_json::Map::new();
             args.insert("items".to_string(), serde_json::Value::Array(item_args));
