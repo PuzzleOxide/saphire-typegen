@@ -1,7 +1,8 @@
 use std::{io::prelude::*, path::PathBuf, fs::File, collections::{hash_map, HashSet}, ops::RangeBounds};
-use proc_macro2::token_stream;
+use proc_macro2::{token_stream, Ident};
 use quote::quote;
 use prettier_please;
+use serde_json::Value;
 use crate::raw_types::{Action, ActionArgOptions, ActionIconOptions};
 
 /// Generates all enum variants for the given action dump file in the directory specified by mod_path.
@@ -41,9 +42,9 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         }
         let action = serde_json::from_value::<Action>(action.clone()).expect(&format!("Failed to parse action #{}!", i));
         let action_block = action.codeblock_name.to_ascii_lowercase().replace(" ", "_");
-        let action = gen_action(action, &mut enum_names);
+        let action_data = gen_action(action, &mut enum_names);
 
-        module_code.get_mut(&action_block).unwrap().push(action);
+        module_code.get_mut(&action_block).unwrap().push(action_data);
     }
 
     let mut module_path: PathBuf = module_path.into();
@@ -53,17 +54,27 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         let mut file = File::create(&module_path).unwrap();
 
         let enum_name = quote::format_ident!("{}", snake_to_camel_case(&module_name));
+        let (action_defs, compile_functions): (Vec<_>, Vec<_>) = module_code.into_iter().unzip();
         let module_code = quote!(
             use either::Either;
+            use serde_json::Value;
             use crate::types::*;
 
             pub enum #enum_name {
-                #(#module_code)*
+                #(#action_defs),*
+            }
+
+            impl #enum_name {
+                pub fn compile(&self) -> Value {
+                    match self {
+                        #(#compile_functions)*
+                    }
+                }
             }
         );
 
-        // let module_code = syn::parse2(module_code).unwrap();
-        // let module_code = prettier_please::unparse(&module_code);
+        let module_code = syn::parse2(module_code).unwrap();
+        let module_code = prettier_please::unparse(&module_code);
 
         file.write_all(module_code.to_string().as_bytes()).unwrap();
 
@@ -72,11 +83,12 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
 }
 
 /// Generates a single enum variant for a given action object.
-fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream::TokenStream {
+fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream::TokenStream, token_stream::TokenStream) {
     let mut action_name = match &action.icon {
         ActionIconOptions::Icon(icon) => format_name(&icon.name),
         ActionIconOptions::Event(argless) => format_name(&argless.name)
     };
+    let unformated_action_name = action.name.clone();
     // if action.aliases.len() > 0 {
     //     action_name = format_name(&action.aliases[0]);
     // }
@@ -103,6 +115,8 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
         ActionIconOptions::Icon(icon) => icon.arguments,
         ActionIconOptions::Event(_) => Vec::new(),
     };
+
+    let mut arg_names = Vec::new();
 
     let mut i = 0;
     let len = args.len();
@@ -139,6 +153,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
             }
 
             let arg_name = quote::format_ident!("{}", remove_leading_nonalpha(&outer_arg.description[0]).replace(" ", "_").replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "").to_lowercase().replace("type", "type_"));
+            arg_names.push(arg_name.clone());
             arg_types.push(quote!(
                 #arg_name: #output
             ));
@@ -150,10 +165,32 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> token_stream:
     let enum_var = quote!(
         #action_name {
             #(#arg_types),*
-        },
+        }
     );
 
-    enum_var
+    let block_name = quote::format_ident!("{}", snake_to_camel_case(&action.codeblock_name.to_ascii_lowercase().replace(" ", "_")));
+
+    let nums = 1..=arg_names.len();
+    let compile_function = quote!(
+        #block_name::#action_name {#(#arg_names),*} => {
+            let mut map = serde_json::Map::new();
+            let mut item_args = Vec::new();
+
+            #(item_args.push(
+                #arg_names.json(#nums)
+            );)*
+
+            let mut args = serde_json::Map::new();
+            args.insert("items".to_string(), serde_json::Value::Array(item_args));
+
+            map.insert("action".to_string(), serde_json::Value::String(#unformated_action_name.to_string()));
+            map.insert("args".to_string(), serde_json::Value::Object(args));
+
+            serde_json::Value::Object(map)
+        }
+    );
+
+    (enum_var, compile_function)
 }
 
 fn remove_leading_nonalpha(name: &str) -> String {
