@@ -8,6 +8,8 @@ pub struct Action {
     pub tags: Vec<ActionTags>,
     pub aliases: Vec<String>,
     pub icon: ActionIconOptions,
+    #[serde(default)]
+    pub sub_action_blocks: Vec<String>
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]

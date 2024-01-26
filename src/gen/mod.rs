@@ -59,6 +59,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
             use either::Either;
             use serde_json::Value;
             use crate::types::*;
+            use crate::block::block_types::subactions::*;
 
             pub enum #enum_name {
                 #(#action_defs),*
@@ -162,16 +163,51 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
         i += 1;
     }
     eprintln!("args: {:?}", arg_types);
+    let subactions = if action.sub_action_blocks == vec!["if_entity", "if_var", "if_game"] {
+        quote!(subaction: SelectEntity,)
+    }
+    else if action.sub_action_blocks == vec!["if_player", "if_var", "if_game"] {
+        quote!(subaction: SelectPlayer,)
+    }
+    else if action.sub_action_blocks == vec!["if_player", "if_entity", "if_var", "if_game"] {
+        quote!(subaction: AllSubactions,)
+    }
+    else {
+        quote!()
+    };
+
     let enum_var = quote!(
         #action_name {
+            #subactions
             #(#arg_types),*
         }
     );
 
+    let subactions = if action.sub_action_blocks.len() > 0 {
+        quote!(subaction,)
+    }
+    else {
+        quote!()
+    };
+
     let block_name = quote::format_ident!("{}", snake_to_camel_case(&action.codeblock_name.to_ascii_lowercase().replace(" ", "_")));
+    
+    let subaction_compiler = if action.sub_action_blocks.len() > 0 {
+        quote!(
+            let mut subaction = subaction.compile();
+            let value = subaction.as_object_mut().unwrap();
+            value.insert("subaction".to_string(), value["action"].clone());
+            value.insert("action".to_string(), serde_json::Value::String(#unformated_action_name.to_string()));
+            drop(value);
+            subaction
+        )
+    }
+    else {
+        quote!(serde_json::Value::Object(map))
+    };
 
     let compile_function = quote!(
-        #block_name::#action_name {#(#arg_names),*} => {
+        #block_name::#action_name {#subactions #(#arg_names),*} => {
             let mut map = serde_json::Map::new();
             let mut item_args = compile(vec![#(#arg_names.json()),*]);
 
@@ -181,7 +217,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
             map.insert("action".to_string(), serde_json::Value::String(#unformated_action_name.to_string()));
             map.insert("args".to_string(), serde_json::Value::Object(args));
 
-            serde_json::Value::Object(map)
+            #subaction_compiler
         }
     );
 
