@@ -209,7 +209,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
     let compile_function = quote!(
         #block_name::#action_name {#subactions #(#arg_names),*} => {
             let mut map = serde_json::Map::new();
-            let mut item_args = compile(vec![#(#arg_names.json()),*]);
+            let item_args = compile(vec![#(#arg_names.json()),*]);
 
             let mut args = serde_json::Map::new();
             args.insert("items".to_string(), serde_json::Value::Array(item_args));
