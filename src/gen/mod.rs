@@ -1,6 +1,6 @@
-use std::{io::prelude::*, path::PathBuf, fs::File, collections::{hash_map, HashSet}, ops::RangeBounds};
+use std::{collections::{hash_map, HashMap, HashSet}, fs::File, hash, io::prelude::*, ops::RangeBounds, option, path::PathBuf};
 use proc_macro2::{token_stream, Ident};
-use quote::quote;
+use quote::{format_ident, quote};
 use prettier_please;
 use serde_json::Value;
 use crate::raw_types::{Action, ActionArgOptions, ActionIconOptions};
@@ -33,6 +33,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
     module_code.insert("select_object".to_string(), Vec::new());
 
     let mut enum_names = HashSet::new();
+    let mut tags = TagSet::new();
 
     for (i, action) in actions.iter().enumerate() {
         // Skips call function and call process actions.
@@ -42,7 +43,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         }
         let action = serde_json::from_value::<Action>(action.clone()).expect(&format!("Failed to parse action #{}!", i));
         let action_block = action.codeblock_name.to_ascii_lowercase().replace(" ", "_");
-        let action_data = gen_action(action, &mut enum_names);
+        let action_data = gen_action(action, &mut enum_names, &mut tags);
 
         module_code.get_mut(&action_block).unwrap().push(action_data);
     }
@@ -54,7 +55,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
         let mut file = File::create(&module_path).unwrap();
 
         let enum_name = quote::format_ident!("{}", snake_to_camel_case(&module_name));
-        let (action_defs, compile_functions): (Vec<_>, Vec<_>) = module_code.into_iter().unzip();
+        let (action_defs, (compile_functions, tag_defs)): (Vec<_>, (Vec<_>, Vec<_>)) = module_code.into_iter().unzip();
         let module_code = quote!(
             use either::Either;
             use serde_json::Value;
@@ -72,6 +73,8 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
                     }
                 }
             }
+
+            #(#tag_defs)*
         );
 
         let module_code = syn::parse2(module_code).unwrap();
@@ -84,7 +87,7 @@ pub fn gen_types<T: Into<PathBuf>>(action_dump_path: T, module_path: T) -> () {
 }
 
 /// Generates a single enum variant for a given action object.
-fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream::TokenStream, token_stream::TokenStream) {
+fn gen_action(action: Action, used_names: &mut HashSet<String>, tags: &mut TagSet) -> (token_stream::TokenStream, (token_stream::TokenStream, token_stream::TokenStream)) {
     let mut action_name = match &action.icon {
         ActionIconOptions::Icon(icon) => format_name(&icon.name),
         ActionIconOptions::Event(argless) => format_name(&argless.name)
@@ -119,6 +122,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
 
     let mut arg_names = Vec::new();
 
+    // Turns the argument list into a list of fields with types.
     let mut i = 0;
     let len = args.len();
     while i < len {
@@ -163,6 +167,77 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
         i += 1;
     }
     eprintln!("args: {:?}", arg_types);
+
+    // turns the tag list into a list of fields with types and a tokenstream of tag enum definitions.
+    let mut tag_types = Vec::new();
+    let mut tag_names = Vec::new();
+    let mut tag_defs: Vec<token_stream::TokenStream> = Vec::new();
+    for tag in action.tags {
+        let tag_type = format_ident!("{}{}", &format_name(&tag.name), action_name);
+        let tag_ident = format_ident!("{}_tag", remove_leading_nonalpha(&tag.name).replace(" ", "_").replace(|c: char| {!c.is_ascii_alphanumeric() && c != '_'}, "").to_lowercase().replace("type", "type_"));
+        let tag_name_unformated = tag.name.clone();
+        tag_types.push(quote!(#tag_ident: #tag_type));
+        tag_names.push(tag_ident.clone());
+
+        let mut tag_default = format_ident!("placeholder");
+        let mut tag_options = Vec::new();
+        let mut tag_strings = Vec::new();
+        for option in tag.options {
+            let option_name = if format_name(&replace_numeric(&option.name)) != "" {
+                format_ident!("{}", &format_name(&replace_numeric(&option.name)))
+            } 
+            else if option.aliases.len() > 0 && format_name(&remove_leading_nonalpha(&option.aliases[0])) != "" {
+                format_ident!("{}", &format_name(&replace_numeric(&option.aliases[0])))
+            }
+            else {
+                format_ident!("{}", snake_to_camel_case(&format_name(&option.icon.description[0])))
+                
+            };
+
+            if option.name == tag.default_option {
+                tag_default = option_name.clone();
+            }
+
+            tag_options.push(option_name.clone());
+            tag_strings.push(option.name.clone());
+        }
+
+        let tag_def = quote!(
+            #[derive(Debug, Clone)]
+            pub enum #tag_type {
+                #(#tag_options),*
+            }
+
+            impl #tag_type {
+                pub fn json(&self) -> serde_json::Map<String, Value> {
+                    let mut map = serde_json::Map::new();
+                    let mut data = serde_json::Map::new();
+                    data.insert("option".to_string(),
+                    match self {
+                        #(#tag_type::#tag_options => Value::String(#tag_strings.to_string())),*
+                    });
+                    data.insert("tag".to_string(), Value::String(#tag_name_unformated.to_string()));
+                    data.insert("action".to_string(), Value::String(#unformated_action_name.to_string()));
+                    data.insert("block".to_string(), Value::String(#unformated_action_name.to_string()));
+
+                    map.insert("data".to_string(), Value::Object(data));
+                    map.insert("id".to_string(), Value::String("bl_tag".to_string()));
+                    map
+                }
+            }
+
+            impl Default for #tag_type {
+                fn default() -> Self {
+                    Self::#tag_default
+                }
+            }
+        );
+
+        tag_defs.push(tag_def);
+    }
+    let tag_defs = quote!(#(#tag_defs)*);
+
+    // Turns the subaction list into a field, if it exists.
     let subactions = if action.sub_action_blocks == vec!["if_entity", "if_var", "if_game"] {
         quote!(subaction: SelectEntity,)
     }
@@ -179,7 +254,8 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
     let enum_var = quote!(
         #action_name {
             #subactions
-            #(#arg_types),*
+            #(#arg_types,)*
+            #(#tag_types),*
         }
     );
 
@@ -190,6 +266,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
         quote!()
     };
 
+    // creates the compile function for the action.
     let block_name = quote::format_ident!("{}", snake_to_camel_case(&action.codeblock_name.to_ascii_lowercase().replace(" ", "_")));
     
     let subaction_compiler = if action.sub_action_blocks.len() > 0 {
@@ -207,9 +284,9 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
     };
 
     let compile_function = quote!(
-        #block_name::#action_name {#subactions #(#arg_names),*} => {
+        #block_name::#action_name {#subactions #(#arg_names,)* #(#tag_names),*} => {
             let mut map = serde_json::Map::new();
-            let item_args = compile(vec![#(#arg_names.json()),*]);
+            let mut item_args = compile(vec![#(#arg_names.json()),*], vec![#(#tag_names.json()),*]);
 
             let mut args = serde_json::Map::new();
             args.insert("items".to_string(), serde_json::Value::Array(item_args));
@@ -221,7 +298,36 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>) -> (token_stream
         }
     );
 
-    (enum_var, compile_function)
+    (enum_var, (compile_function, tag_defs))
+}
+
+struct TagSet {
+    tags: Vec<Tag>,
+    tags_by_name: HashMap<String, usize>,
+}
+
+impl TagSet {
+    fn new() -> Self {
+        Self {
+            tags: Vec::new(),
+            tags_by_name: HashMap::new(),
+        }
+    }
+}
+
+struct Tag {
+    pub name: String,
+    pub action_name: String,
+    pub block_name: String,
+    pub tags: HashSet<String>,
+    pub name_style: TagStyle,
+}
+
+enum TagStyle {
+    Unique,
+    UniqueWithBlock,
+    UniqueWithAction,
+    SharedNonUnique,
 }
 
 fn remove_leading_nonalpha(name: &str) -> String {
@@ -236,6 +342,19 @@ fn remove_leading_nonalpha(name: &str) -> String {
         }
     }
     output
+}
+
+fn replace_numeric(name: &str) -> String {
+    name.replace("1", "One")
+        .replace("2", "Two")
+        .replace("3", "Three")
+        .replace("4", "Four")
+        .replace("5", "Five")
+        .replace("6", "Six")
+        .replace("7", "Seven")
+        .replace("8", "Eight")
+        .replace("9", "Nine")
+        .replace("0", "Zero")
 }
 
 fn format_name(name: &str) -> String {
