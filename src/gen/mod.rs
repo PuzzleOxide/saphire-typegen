@@ -275,7 +275,6 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>, tags: &mut TagSe
             let value = subaction.as_object_mut().unwrap();
             value.insert("subaction".to_string(), value["action"].clone());
             value.insert("action".to_string(), serde_json::Value::String(#unformated_action_name.to_string()));
-            drop(value);
             subaction
         )
     }
@@ -286,7 +285,7 @@ fn gen_action(action: Action, used_names: &mut HashSet<String>, tags: &mut TagSe
     let compile_function = quote!(
         #block_name::#action_name {#subactions #(#arg_names,)* #(#tag_names),*} => {
             let mut map = serde_json::Map::new();
-            let mut item_args = compile(vec![#(#arg_names.json()),*], vec![#(#tag_names.json()),*]);
+            let item_args = compile(vec![#(#arg_names.json()),*], vec![#(#tag_names.json()),*]);
 
             let mut args = serde_json::Map::new();
             args.insert("items".to_string(), serde_json::Value::Array(item_args));
@@ -383,7 +382,7 @@ fn arg_type_to_rust(arg_type: &str) -> token_stream::TokenStream {
         "POTION" => quote!(Potion),
         "SPAWN_EGG" => quote!(SpawnEgg),
         "ENTITY_TYPE" => quote!(EntityType),
-        "VARIABLE" => quote!(Variable),
+        "VARIABLE" => quote!(VariableLiteral),
         "ANY_TYPE" => quote!(AnyType),
         "DICT" => quote!(Dict),
         "LIST" => quote!(List),
